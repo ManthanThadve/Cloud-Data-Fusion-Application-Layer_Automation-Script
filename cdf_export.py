@@ -108,7 +108,6 @@ def fetch_applications(headers):
 
 def fetch_pipelines_list(namespace, headers):
     try:
-        # response = session.get(f"https://{CDAP_BASE_URL}api/v3/namespaces/{namespace}/apps", headers=headers)
         response = session.get(f"https://{CDAP_BASE_URL}/api/v3/namespaces/system/apps/pipeline/services/studio/methods/v1/contexts/{namespace}/drafts", headers=headers)
         response.raise_for_status()
         return response.json()
@@ -119,7 +118,6 @@ def fetch_pipelines_list(namespace, headers):
 
 def fetch_pipeline(namespace, header, draft_id):
     try:
-        # response = session.get(f"https://{CDAP_BASE_URL}api/v3/namespaces/{namespace}/apps/{app}", headers=header)
         response = session.get(f"https://{CDAP_BASE_URL}api/v3/namespaces/system/apps/pipeline/services/studio/methods/v1/contexts/{namespace}/drafts/{draft_id}", headers=header)
         response.raise_for_status()
         return response.json()
@@ -144,17 +142,11 @@ def save_to_gcs(file_name, file_path, bucket_folder):
     try:
 
         # Upload the .zip file to GCS
-        # client = storage.Client()
         bucket = storage_client.bucket(GCS_BUCKET_NAME)
         blob = bucket.blob(f"{bucket_folder}/{file_name}")
         blob.upload_from_filename(file_path)
 
         logging.info(f"Zip file uploaded to GCS bucket '{GCS_BUCKET_NAME}' as '{file_name}'.")
-
-        # bucket = storage_client.bucket(GCS_BUCKET_NAME)
-        # blob = bucket.blob(file_name)
-        # blob.upload_from_string(json.dumps(data))
-        # logging.info(f"Saved {file_name} to GCS.")
     except Exception as e:
         logging.error(f"Failed to save {file_name} to GCS: {e}")
 
@@ -243,7 +235,6 @@ def download_and_unzip_from_gcs(gcs_folder_path, version=None):
                 zip_version = blob.name.split("/")[-1].split("_")[0]
                 if zip_version == version:
                     zip_blob = blob
-                    # zip_filename = zip_blob.name.split("/")[-1]
                     logging.info(f"Archive have the Specified version for date '{zip_version}'.")
                     break
             if not zip_blob:
@@ -267,8 +258,6 @@ def download_and_unzip_from_gcs(gcs_folder_path, version=None):
         local_extract_path = os.path.join(RESTORE_DIRECTORY, extract_dir)
 
         # Download the .zip file from GCS
-        # client = storage.Client()
-        # blob = bucket.blob(f"{folder_path}/{zip_filename}")
         zip_blob.download_to_filename(local_zip_path)
         logging.info(f"Downloaded '{zip_filename}' from GCS bucket '{GCS_BUCKET_NAME}/{gcs_folder_path}' to '{RESTORE_DIRECTORY}'.")
 
@@ -316,8 +305,6 @@ def save_to_file(filename, content):
 
 def format_deployed_apps(apps_location, namespaces):
     logging.info("*********Formatting Application****************")
-    # Sample response with the configuration field
-    # file_path = "defects/error_pipeline.json"
     for namespace in namespaces:
         name = namespace["name"]
         namespace_dir = os.path.join(apps_location, name)
@@ -377,19 +364,16 @@ def backup_application_state(headers):
 
     format_deployed_apps(export_dir, namespaces)
 
-    # zip_folder = os.path.join(BACKUP_DIRECTORY, f"{TODAY}_backup")
     zip_folder = export_dir
     if not os.path.exists(zip_folder):
         os.makedirs(zip_folder)
 
     file_path = os.path.join(zip_folder, "namespaces.json")
-    # save_to_gcs("cdf/namespaces.json", namespaces)
     save_to_file(file_path, namespaces)
 
     for namespace in namespaces:
         namespace_name = namespace["name"]
 
-        # if namespace_name != "default":
         try:
 
             namespace_dir = os.path.join(zip_folder, namespace_name)
@@ -400,14 +384,11 @@ def backup_application_state(headers):
             logging.info(f"*************Fetching Pipelines from {namespace_name}********************")
             pipelines_list = fetch_pipelines_list(namespace_name, headers)
             for pipeline in pipelines_list:
-                # print(pipeline)
                 pipeline_name = pipeline.get('name')
                 draft_id = pipeline.get('id')
-                # print(pipeline_name)
                 content = fetch_pipeline(namespace_name, headers, draft_id)
                 pipeline_file_path = os.path.join(namespace_dir, f"draft_{pipeline_name}.json")
 
-                # save_to_gcs(f"cdf/{namespace_name}/pipelines/{pipeline_name}.json", content)
                 save_to_file(pipeline_file_path, content)
 
             logging.info(f"***************Fetching Connections from {namespace_name}*****************")
@@ -415,7 +396,6 @@ def backup_application_state(headers):
             for connection in connections:
                 connection_name = connection.get('name')
                 connection_file_path = os.path.join(namespace_dir, f"conn_{connection_name}.json")
-                # save_to_gcs(f"cdf/{namespace_name}/connections/{connection_name}.json", connection)
                 save_to_file(connection_file_path, connection)
         except Exception as e:
             logging.error(f"Failed to fetch connections/pipelines for namespace '{namespace_name}': {e.args}")
@@ -423,7 +403,6 @@ def backup_application_state(headers):
     try:
         logging.info("***************Compressing and uploading the backup files to GCS******************************")
 
-        # compress_folder_and_upload_to_gcs(zip_folder, ZIPFILE_NAME)
         zip_path = compress_folder(zip_folder)
 
         save_to_gcs(ZIPFILE_NAME, zip_path ,GCS_ARCHIVE_FOLDER)
@@ -444,7 +423,6 @@ def restore_application_state(headers, restore_version=None):
 
     namespace_file_path = os.path.join(zip_blob_path, "namespaces.json")
     namespaces = read_from_file(namespace_file_path)
-    # namespaces = load_from_gcs("cdf/namespaces.json")
     if not namespaces:
         logging.warning("No namespaces found in backup. Exiting restore process.")
         return
@@ -496,14 +474,10 @@ def restore_application_state(headers, restore_version=None):
 
         # Recreate Draft pipelines
         for blob in pipeline_files:
-            print("pipe --> ", blob)
-            # pipeline = load_from_gcs(blob.name)
             pipeline = read_from_file(os.path.join(namespace_dir, blob))
             try:
                 pipeline_name = pipeline["id"]
-                # print(pipeline)
 
-                # for pipeline in pipelines:
                 response = session.put(
                     f"https://{CDAP_BASE_URL}api/v3/namespaces/system/apps/pipeline/services/studio/methods/v1/contexts/{name}/drafts/{pipeline_name}",
                     json=pipeline,
@@ -515,8 +489,6 @@ def restore_application_state(headers, restore_version=None):
 
             # Recreate connections
             for blob in conn_files:
-                print("conn -->", blob)
-                # connection = load_from_gcs(blob.name)
                 connection = read_from_file(os.path.join(namespace_dir, blob))
                 connection_name = connection["name"]
 
@@ -547,7 +519,6 @@ def main():
         if args.operation == "backup":
             backup_application_state(headers)
         elif args.operation == "restore":
-            # print(args.restore_version)
             restore_application_state(headers, restore_version=args.restore_version)
     except Exception as e:
         logging.error(f"An unexpected error occurred during -> {args.operation}: {e}")
