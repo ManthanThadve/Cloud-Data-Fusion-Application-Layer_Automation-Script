@@ -185,6 +185,8 @@ def compress_folder(folder_path):
 
         logging.info(f"Compressed folder saved at: {zip_path}")
 
+        return zip_path
+
     except Exception as e:
         raise Exception(f"Failed to compress folder: {e}")
 
@@ -254,6 +256,7 @@ def download_and_unzip_from_gcs(gcs_folder_path, version=None):
             print(zip_blob.name)
 
         zip_filename = zip_blob.name.split("/")[-1]
+        extract_dir = zip_blob.name.split("/")[-1][:-4]
 
         # Ensure the local download directory exists
         if not os.path.exists(RESTORE_DIRECTORY):
@@ -261,6 +264,7 @@ def download_and_unzip_from_gcs(gcs_folder_path, version=None):
 
         # Full path to save the .zip file locally
         local_zip_path = os.path.join(RESTORE_DIRECTORY, zip_filename)
+        local_extract_path = os.path.join(RESTORE_DIRECTORY, extract_dir)
 
         # Download the .zip file from GCS
         # client = storage.Client()
@@ -270,12 +274,12 @@ def download_and_unzip_from_gcs(gcs_folder_path, version=None):
 
         # Unzip the file
         with zipfile.ZipFile(local_zip_path, 'r') as zip_ref:
-            zip_ref.extractall(RESTORE_DIRECTORY)
-        logging.info(f"Unzipped contents to '{RESTORE_DIRECTORY}'.")
+            zip_ref.extractall(local_extract_path)
+        logging.info(f"Unzipped contents to '{local_extract_path}'.")
 
-        logging.info(f"File '{zip_filename}' downloaded and extracted successfully to '{RESTORE_DIRECTORY}'.")
+        logging.info(f"File '{zip_filename}' downloaded and extracted successfully to '{local_extract_path}'.")
 
-        return zip_blob.name
+        return local_extract_path
 
     except Exception as e:
         raise Exception(f"Failed to download and unzip file: {e}")
@@ -360,27 +364,6 @@ def format_deployed_apps(apps_location, namespaces):
                     logging.error(f"Error processing file '{file_path}': {e}")
 
 
-def move_to_archive(blob_path):
-    bucket = storage_client.bucket(GCS_BUCKET_NAME)
-
-    # Full paths for the source and destination
-    zipfile_name = blob_path.split("/")[-1]
-
-    source_blob_name = f"{GCS_BACKUP_FOLDER}/{zipfile_name}"
-    destination_blob_name = f"{GCS_ARCHIVE_FOLDER}/{zipfile_name}"
-
-    # Get the source blob
-    source_blob = bucket.blob(source_blob_name)
-
-    # Copy the blob to the archive folder
-    bucket.copy_blob(source_blob, bucket, destination_blob_name)
-    logging.info(f"Copied {source_blob_name} to {destination_blob_name}")
-
-    # Delete the original blob from the latest folder
-    source_blob.delete()
-    logging.info(f"Deleted {source_blob_name} from the latest folder")
-
-
 # Backup Application State
 def backup_application_state(headers):
 
@@ -393,7 +376,6 @@ def backup_application_state(headers):
         return
 
     format_deployed_apps(export_dir, namespaces)
-
 
     # zip_folder = os.path.join(BACKUP_DIRECTORY, f"{TODAY}_backup")
     zip_folder = export_dir
@@ -442,11 +424,11 @@ def backup_application_state(headers):
         logging.info("***************Compressing and uploading the backup files to GCS******************************")
 
         # compress_folder_and_upload_to_gcs(zip_folder, ZIPFILE_NAME)
-        compress_folder(zip_folder)
+        zip_path = compress_folder(zip_folder)
 
-        save_to_gcs(ZIPFILE_NAME, zip_folder ,GCS_ARCHIVE_FOLDER)
+        save_to_gcs(ZIPFILE_NAME, zip_path ,GCS_ARCHIVE_FOLDER)
 
-        save_to_gcs("backup.zip", zip_folder, GCS_BACKUP_FOLDER)
+        save_to_gcs("backup.zip", zip_path, GCS_BACKUP_FOLDER)
 
     except Exception as e:
         logging.error(f"Failed to compress and upload backup files to GCS: {e}")
@@ -460,7 +442,7 @@ def restore_application_state(headers, restore_version=None):
     else:
         zip_blob_path = download_and_unzip_from_gcs(GCS_BACKUP_FOLDER)
 
-    namespace_file_path = os.path.join(RESTORE_DIRECTORY, "namespaces.json")
+    namespace_file_path = os.path.join(zip_blob_path, "namespaces.json")
     namespaces = read_from_file(namespace_file_path)
     # namespaces = load_from_gcs("cdf/namespaces.json")
     if not namespaces:
@@ -473,7 +455,7 @@ def restore_application_state(headers, restore_version=None):
         conn_files = []
         pipeline_files = []
         deployed_apps = []
-        namespace_dir = os.path.join(RESTORE_DIRECTORY, name)
+        namespace_dir = os.path.join(zip_blob_path, name)
 
         # Iterate through files in the directory
         for file in os.listdir(namespace_dir):
@@ -507,7 +489,7 @@ def restore_application_state(headers, restore_version=None):
                 response = session.put(
                 f"https://{CDAP_BASE_URL}api/v3/namespaces/{name}/apps/{app_name}", json=app_pipeline, headers=headers)
                 response.raise_for_status()
-                logging.info(f"App '{app}' recreated successfully.")
+                logging.info(f"App '{app}' recreated successfully in '{name}' namespace.")
 
             except Exception as e:
                 logging.error(f"Failed to recreate app '{app}': {e}")
@@ -548,12 +530,6 @@ def restore_application_state(headers, restore_version=None):
                 except requests.exceptions.RequestException as e:
                     logging.error(
                         f"Failed to restore connection '{connection['name']}' in namespace '{name}': {e}")
-
-    if not restore_version:
-        logging.info("Moving the latest backup ZIP file to archive folder.")
-        logging.info(
-            "********************************Moving backup Zip to archive*************************************")
-        move_to_archive(zip_blob_path)
 
 
 # Main Function
